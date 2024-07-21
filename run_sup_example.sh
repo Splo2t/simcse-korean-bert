@@ -16,7 +16,7 @@ export OMP_NUM_THREADS=8
 # If you only want to use one card, uncomment the following line and comment the line with "torch.distributed.launch"
 # python train.py \
 python -m torch.distributed.launch --nproc_per_node $NUM_GPU --master_port $PORT_ID train.py \
-    --model_name_or_path bert-base-uncased \
+    --model_name_or_path ourbert \
     --train_file data/nli_for_simcse.csv \
     --output_dir result/my-sup-simcse-bert-base-uncased \
     --num_train_epochs 3 \

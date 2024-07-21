@@ -33,7 +33,7 @@ from transformers import (
 from transformers.tokenization_utils_base import BatchEncoding, PaddingStrategy, PreTrainedTokenizerBase
 from transformers.trainer_utils import is_main_process
 from transformers.data.data_collator import DataCollatorForLanguageModeling
-from transformers.file_utils import cached_property, torch_required, is_torch_available, is_torch_tpu_available
+from transformers.file_utils import cached_property, is_torch_available, is_torch_tpu_available
 from simcse.models import RobertaForCL, BertForCL
 from simcse.trainers import CLTrainer
 
@@ -196,7 +196,6 @@ class OurTrainingArguments(TrainingArguments):
     )
 
     @cached_property
-    @torch_required
     def _setup_devices(self) -> "torch.device":
         logger.info("PyTorch: setting up devices")
         if self.no_cuda:
@@ -304,15 +303,12 @@ def main():
         data_files["train"] = data_args.train_file
     extension = data_args.train_file.split(".")[-1]
     if extension == "txt":
-        extension = "text"
+        datasets = load_dataset("text", data_files=data_files, cache_dir="./data/")
     if extension == "csv":
         datasets = load_dataset(extension, data_files=data_files, cache_dir="./data/", delimiter="\t" if "tsv" in data_args.train_file else ",")
-    else:
-        datasets = load_dataset(extension, data_files=data_files, cache_dir="./data/")
-
+    
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
     # https://huggingface.co/docs/datasets/loading_datasets.html.
-
     # Load pretrained model and tokenizer
     #
     # Distributed training:
@@ -336,16 +332,23 @@ def main():
         "use_fast": model_args.use_fast_tokenizer,
         "revision": model_args.model_revision,
         "use_auth_token": True if model_args.use_auth_token else None,
+        "strip_accents":False,  
+        "lowercase":False,
     }
+    
     if model_args.tokenizer_name:
         tokenizer = AutoTokenizer.from_pretrained(model_args.tokenizer_name, **tokenizer_kwargs)
     elif model_args.model_name_or_path:
         tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, **tokenizer_kwargs)
-    else:
-        raise ValueError(
-            "You are instantiating a new tokenizer from scratch. This is not supported by this script."
-            "You can do it from another script, save it, and load it from here, using --tokenizer_name."
-        )
+
+    #temp_tok = MODEL_CLASSES[args.model_type][2].from_pretrained(args.model_name_or_path,model_max_length = 300, strip_accents=False,  lowercase=False )
+    #temp_tok
+        
+    #else:
+    #    raise ValueError(
+    #        "You are instantiating a new tokenizer from scratch. This is not supported by this script."
+    #        "You can do it from another script, save it, and load it from here, using --tokenizer_name."
+    #    )
 
     if model_args.model_name_or_path:
         if 'roberta' in model_args.model_name_or_path:
@@ -361,11 +364,11 @@ def main():
         elif 'bert' in model_args.model_name_or_path:
             model = BertForCL.from_pretrained(
                 model_args.model_name_or_path,
-                from_tf=bool(".ckpt" in model_args.model_name_or_path),
+                #from_tf=bool(".ckpt" in model_args.model_name_or_path),
                 config=config,
-                cache_dir=model_args.cache_dir,
-                revision=model_args.model_revision,
-                use_auth_token=True if model_args.use_auth_token else None,
+                #cache_dir=model_args.cache_dir,
+                #revision=model_args.model_revision,
+                #use_auth_token=True if model_args.use_auth_token else None,
                 model_args=model_args
             )
             if model_args.do_mlm:
@@ -376,9 +379,37 @@ def main():
     else:
         raise NotImplementedError
         logger.info("Training new model from scratch")
-        model = AutoModelForMaskedLM.from_config(config)
+        model = BertForMaskedLM.from_config(config)
+
 
     model.resize_token_embeddings(len(tokenizer))
+
+    from torch import nn 
+    print(model)
+    """
+    embedding_layer = model.bert.embeddings.token_type_embeddings
+    old_num_tokens, old_embedding_dim = embedding_layer.weight.shape
+    num_new_tokens = 2
+
+    # Creating new embedding layer with more entries
+    new_embeddings = nn.Embedding(
+            old_num_tokens + num_new_tokens, old_embedding_dim
+    )
+
+    # Setting device and type accordingly
+    new_embeddings.to(
+        embedding_layer.weight.device,
+        dtype=embedding_layer.weight.dtype,
+    )
+
+    # Copying the old entries
+    new_embeddings.weight.data[:old_num_tokens, :] = embedding_layer.weight.data[
+        :old_num_tokens, :
+    ]
+    new_embeddings.weight.data[-1] = embedding_layer.weight.data[5].clone() #NNG
+    new_embeddings.weight.data[-2] = embedding_layer.weight.data[5].clone() #NNP
+    model.bert.embeddings.word_embeddings = new_embeddings
+    """
 
     # Prepare features
     column_names = datasets["train"].column_names
@@ -429,9 +460,9 @@ def main():
             sentences,
             max_length=data_args.max_seq_length,
             truncation=True,
-            padding="max_length" if data_args.pad_to_max_length else False,
+            padding="max_length"
         )
-
+        #print(sent_features)
         features = {}
         if sent2_cname is not None:
             for key in sent_features:
@@ -439,22 +470,20 @@ def main():
         else:
             for key in sent_features:
                 features[key] = [[sent_features[key][i], sent_features[key][i+total]] for i in range(total)]
-            
         return features
-
+    
     if training_args.do_train:
         train_dataset = datasets["train"].map(
             prepare_features,
             batched=True,
             num_proc=data_args.preprocessing_num_workers,
             remove_columns=column_names,
-            load_from_cache_file=not data_args.overwrite_cache,
-        )
-
+            #load_from_cache_file=not data_args.overwrite_cache,
+    )
+    print(train_dataset[0])
     # Data collator
     @dataclass
     class OurDataCollatorWithPadding:
-
         tokenizer: PreTrainedTokenizerBase
         padding: Union[bool, str, PaddingStrategy] = True
         max_length: Optional[int] = None
@@ -463,7 +492,7 @@ def main():
         mlm_probability: float = data_args.mlm_probability
 
         def __call__(self, features: List[Dict[str, Union[List[int], List[List[int]], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
-            special_keys = ['input_ids', 'attention_mask', 'token_type_ids', 'mlm_input_ids', 'mlm_labels']
+            special_keys = ['input_ids', 'attention_mask', 'token_type_ids','seg_ids', 'mlm_input_ids', 'mlm_labels']
             bs = len(features)
             if bs > 0:
                 num_sent = len(features[0]['input_ids'])
@@ -530,7 +559,7 @@ def main():
             return inputs, labels
 
     data_collator = default_data_collator if data_args.pad_to_max_length else OurDataCollatorWithPadding(tokenizer)
-
+    training_args.gradient_accumulation_steps = 16
     trainer = CLTrainer(
         model=model,
         args=training_args,
@@ -547,7 +576,7 @@ def main():
             if (model_args.model_name_or_path is not None and os.path.isdir(model_args.model_name_or_path))
             else None
         )
-        train_result = trainer.train(model_path=model_path)
+        train_result = trainer.train()#model_path=model_path)
         trainer.save_model()  # Saves the tokenizer too for easy upload
 
         output_train_file = os.path.join(training_args.output_dir, "train_results.txt")

@@ -6,7 +6,22 @@ simcse/__pycache__/
 
 # C extensions
 *.so
+*.txt
 
+run_unsup_example_0.sh
+run_unsup_example_1.sh
+run_sup_example.sh
+make_kiwi_data.ipynb
+krong*
+
+tokenize_test_data/*
+ourbert/*
+ourbert-simcse/*
+train_krongbert.py
+simcse/models_krong.py
+
+tokenize_test.ipynb
+tokenize_test.py
 # Distribution / packaging
 .Python
 build/
@@ -134,3 +149,9 @@ data
 result
 .venv-cu11
 wandb
+result/*
+
+
+
+
+SentEval/data/downstream/STS/STSBenchmark/sts-test-*

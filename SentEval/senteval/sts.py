@@ -162,11 +162,11 @@ class STSBenchmarkEval(STSEval):
         logging.debug('\n\n***** Transfer task : STSBenchmark*****\n\n')
         self.seed = seed
         self.samples = []
-        train = self.loadFile(os.path.join(task_path, 'sts-train.csv'))
-        dev = self.loadFile(os.path.join(task_path, 'sts-dev.csv'))
-        test = self.loadFile(os.path.join(task_path, 'sts-test.csv'))
-        self.datasets = ['train', 'dev', 'test']
-        self.data = {'train': train, 'dev': dev, 'test': test}
+        #train = self.loadFile(os.path.join(task_path, 'sts-train.csv'))
+        #dev = self.loadFile(os.path.join(task_path, 'sts-dev.csv'))
+        test = self.loadFile(os.path.join(task_path, 'sts-test.tsv'))
+        self.datasets = ['test']
+        self.data = {'test': test}
 
     def loadFile(self, fpath):
         sick_data = {'X_A': [], 'X_B': [], 'y': []}
@@ -174,9 +174,10 @@ class STSBenchmarkEval(STSEval):
             for line in f:
                 text = line.strip().split('\t')
                 sick_data['X_A'].append(text[5].split())
+                #print(sick_data['X_A'])
                 sick_data['X_B'].append(text[6].split())
                 sick_data['y'].append(text[4])
-
+    
         sick_data['y'] = [float(s) for s in sick_data['y']]
         self.samples += sick_data['X_A'] + sick_data["X_B"]
         return (sick_data['X_A'], sick_data["X_B"], sick_data['y'])

@@ -1,9 +1,9 @@
-transformers==4.2.1
+transformers==4.29.2
 scipy
-datasets
+datasets==2.12.0
 pandas
 scikit-learn
 prettytable
 gradio
-torch
+torch==2.1.0+cu118
 setuptools

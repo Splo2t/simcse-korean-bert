@@ -72,7 +72,7 @@ if version.parse(torch.__version__) >= version.parse("1.6"):
 if is_datasets_available():
     import datasets
 
-from transformers.trainer import _model_unwrap
+#from transformers.trainer import _model_unwrap
 from transformers.optimization import Adafactor, AdamW, get_scheduler
 import copy
 # Set path to SentEval
@@ -89,7 +89,6 @@ from filelock import FileLock
 logger = logging.get_logger(__name__)
 
 class CLTrainer(Trainer):
-
     def evaluate(
         self,
         eval_dataset: Optional[Dataset] = None,
@@ -104,11 +103,14 @@ class CLTrainer(Trainer):
 
         def batcher(params, batch):
             sentences = [' '.join(s) for s in batch]
+            #print(sentences[0])
             batch = self.tokenizer.batch_encode_plus(
                 sentences,
                 return_tensors='pt',
-                padding=True,
+                max_length=128,
+                padding='max_length', 
             )
+            #print(batch['input_ids'][0])
             for k in batch:
                 batch[k] = batch[k].to(self.args.device)
             with torch.no_grad():
@@ -122,23 +124,23 @@ class CLTrainer(Trainer):
                                             'tenacity': 3, 'epoch_size': 2}
 
         se = senteval.engine.SE(params, batcher, prepare)
-        tasks = ['STSBenchmark', 'SICKRelatedness']
+        tasks = ['STSBenchmark']
         if eval_senteval_transfer or self.args.eval_transfer:
-            tasks = ['STSBenchmark', 'SICKRelatedness', 'MR', 'CR', 'SUBJ', 'MPQA', 'SST2', 'TREC', 'MRPC']
+            tasks = ['STSBenchmark']
         self.model.eval()
         results = se.eval(tasks)
         
-        stsb_spearman = results['STSBenchmark']['dev']['spearman'][0]
-        sickr_spearman = results['SICKRelatedness']['dev']['spearman'][0]
+        stsb_spearman = results['STSBenchmark']['test']['spearman'][0]
+        #sickr_spearman = results['SICKRelatedness']['dev']['spearman'][0]
 
-        metrics = {"eval_stsb_spearman": stsb_spearman, "eval_sickr_spearman": sickr_spearman, "eval_avg_sts": (stsb_spearman + sickr_spearman) / 2} 
-        if eval_senteval_transfer or self.args.eval_transfer:
-            avg_transfer = 0
-            for task in ['MR', 'CR', 'SUBJ', 'MPQA', 'SST2', 'TREC', 'MRPC']:
-                avg_transfer += results[task]['devacc']
-                metrics['eval_{}'.format(task)] = results[task]['devacc']
-            avg_transfer /= 7
-            metrics['eval_avg_transfer'] = avg_transfer
+        metrics = {"eval_stsb_spearman": stsb_spearman}#, "eval_sickr_spearman": sickr_spearman, "eval_avg_sts": (stsb_spearman + sickr_spearman) / 2} 
+        #if eval_senteval_transfer or self.args.eval_transfer:
+        #    avg_transfer = 0
+        #    for task in ['MR', 'CR', 'SUBJ', 'MPQA', 'SST2', 'TREC', 'MRPC']:
+        #        avg_transfer += results[task]['devacc']
+        #        metrics['eval_{}'.format(task)] = results[task]['devacc']
+        #    avg_transfer /= 7
+        #    metrics['eval_avg_transfer'] = avg_transfer
 
         self.log(metrics)
         return metrics
@@ -151,7 +153,7 @@ class CLTrainer(Trainer):
 
         # In all cases, including ddp/dp/deepspeed, self.model is always a reference to the model we
         # want to save.
-        assert _model_unwrap(model) is self.model, "internal model should be a reference to self.model"
+        #assert _model_unwrap(model) is self.model, "internal model should be a reference to self.model"
 
         # Determine the new best metric / best model checkpoint
         if metrics is not None and self.args.metric_for_best_model is not None:
@@ -176,7 +178,7 @@ class CLTrainer(Trainer):
                     self.deepspeed.save_checkpoint(output_dir)
 
                 # Save optimizer and scheduler
-                if self.sharded_dpp:
+                if self.sharded_ddp:
                     self.optimizer.consolidate_state_dict()
 
                 if is_torch_tpu_available():
@@ -243,7 +245,7 @@ class CLTrainer(Trainer):
             if self.is_world_process_zero():
                 self._rotate_checkpoints(use_mtime=True)
     
-    def train(self, model_path: Optional[str] = None, trial: Union["optuna.Trial", Dict[str, Any]] = None):
+    def train(self, model_path: Optional[str] = None, trial: Union["optuna.Trial", Dict[str, Any]] = None, ignore_keys_for_eval: Optional[List[str]] = None,):
         """
         Main training entry point.
 
@@ -329,7 +331,7 @@ class CLTrainer(Trainer):
             model = torch.nn.DataParallel(model)
 
         # Distributed training (should be after apex fp16 initialization)
-        if self.sharded_dpp:
+        if self.sharded_ddp:
             model = ShardedDDP(model, self.optimizer)
         elif self.args.local_rank != -1:
             model = torch.nn.parallel.DistributedDataParallel(
@@ -473,9 +475,9 @@ class CLTrainer(Trainer):
                     if self.args.max_grad_norm is not None and self.args.max_grad_norm > 0 and not self.deepspeed:
                         # deepspeed does its own clipping
 
-                        if self.use_amp:
-                            # AMP: gradients need unscaling
-                            self.scaler.unscale_(self.optimizer)
+                        #if self.use_amp:
+                        #    # AMP: gradients need unscaling
+                        #    self.scaler.unscale_(self.optimizer)
 
                         if hasattr(self.optimizer, "clip_grad_norm"):
                             # Some optimizers (like the sharded optimizer) have a specific way to do gradient clipping
@@ -490,9 +492,9 @@ class CLTrainer(Trainer):
                     # Optimizer step
                     if is_torch_tpu_available():
                         xm.optimizer_step(self.optimizer)
-                    elif self.use_amp:
-                        self.scaler.step(self.optimizer)
-                        self.scaler.update()
+                    #elif self.use_amp:
+                    #    self.scaler.step(self.optimizer)
+                    #    self.scaler.update()
                     else:
                         self.optimizer.step()
                     
@@ -504,13 +506,13 @@ class CLTrainer(Trainer):
                     self.state.epoch = epoch + (step + 1) / steps_in_epoch
                     self.control = self.callback_handler.on_step_end(self.args, self.state, self.control)
 
-                    self._maybe_log_save_evaluate(tr_loss, model, trial, epoch)
+                    self._maybe_log_save_evaluate(tr_loss, model, trial, epoch, ignore_keys_for_eval = ignore_keys_for_eval)
 
                 if self.control.should_epoch_stop or self.control.should_training_stop:
                     break
 
             self.control = self.callback_handler.on_epoch_end(self.args, self.state, self.control)
-            self._maybe_log_save_evaluate(tr_loss, model, trial, epoch)
+            self._maybe_log_save_evaluate(tr_loss, model, trial, epoch, ignore_keys_for_eval = ignore_keys_for_eval)
 
             if self.args.tpu_metrics_debug or self.args.debug:
                 if is_torch_tpu_available():
